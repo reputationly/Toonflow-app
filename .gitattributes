@@ -3,3 +3,15 @@ data/** linguist-generated=true
 
 # 整个 build 编译产物目录（如被提交）
 build/** linguist-generated=true
+
+# 供应商适配脚本强制 LF。
+# 起因：src/lib/vendor.json 里存的是 CRLF 内容，fixDB.ts:160 会用它
+# fs.writeFileSync 覆盖 <数据目录>/vendor/*.ts；而 Node 模式下数据目录就是
+# 仓库的 data/vendor/，所以本地跑一次 yarn dev 就会把这些文件重写成 CRLF，
+# 产生数千行纯换行符 diff、冲掉 git blame。强制规范化后无论谁写入库都是 LF。
+data/vendor/*.ts text eol=lf
+src/lib/vendor.json text eol=lf
+
+# 同理：database.d.ts 由 db.ts 的 initKnexType 自动生成，写出来是 CRLF，
+# 每次跑 dev 都会产生数百行换行符 diff。
+src/types/database.d.ts text eol=lf
