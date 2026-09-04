@@ -24,6 +24,37 @@ const APP_VERSION: string = (() => {
 // 清单结构见 docs/技术评估与开发环境搭建.md §8。
 const DEFAULT_MANIFEST_URL = process.env.UPDATE_MANIFEST_URL || "https://aijisuan.kdns.fr/update.json";
 
+/**
+ * 版本号解析。支持四段式 MAJOR.MINOR.PATCH.BUILD：
+ * 前三段与上游 Toonflow 保持一致，第四段是本仓的定制迭代号——
+ * 上游未发新版时递增它，即可把自有修复通过增量包推给已装机用户。
+ * 缺省段按 0 处理，所以 "1.1.8" 与 "1.1.8.0" 等价。
+ */
+function parseVersion(v: string): number[] {
+  return String(v)
+    .split(".")
+    .map((n) => {
+      const parsed = Number.parseInt(n, 10);
+      return Number.isFinite(parsed) ? parsed : 0;
+    });
+}
+
+/**
+ * 逐段比较，返回首个不同段的下标与两侧取值；完全相同返回 null。
+ *
+ * 必须逐段短路：原实现是三个独立的 if，远端 1.1.9 对本地 1.2.0 时
+ * MAJOR/MINOR 都不满足，却会命中 `PATCH 9 > 0` 而把降级当成更新推出去。
+ */
+function diffSegment(remote: number[], local: number[]): { index: number; remote: number; local: number } | null {
+  const len = Math.max(remote.length, local.length);
+  for (let i = 0; i < len; i++) {
+    const r = remote[i] ?? 0;
+    const l = local[i] ?? 0;
+    if (r !== l) return { index: i, remote: r, local: l };
+  }
+  return null;
+}
+
 export default router.post(
   "/",
   validateFields({
@@ -89,27 +120,21 @@ export default router.post(
     const zipItem = sourceData.find((d: any) => d.type === "zip");
     const installerItem = sourceData.find((d: any) => d.type === platformType[process.platform]);
 
-    const taggerList = tagger.split(".").map(Number);
-    const currentVersionList = APP_VERSION.split(".").map(Number);
-    //对比Major
-    if (taggerList[0] > currentVersionList[0]) {
+    const noUpdate = success({ needUpdate: false, latestVersion: tagger, reinstall: false, time, version: tagger });
+    const seg = diffSegment(parseVersion(tagger), parseVersion(APP_VERSION));
+
+    // 版本相同，或远端反而更旧（回滚了清单 / 用户装了更新的内测包）→ 不提示
+    if (seg === null || seg.remote < seg.local) return res.status(200).send(noUpdate);
+
+    // 前两段（MAJOR/MINOR）变化意味着结构性升级，必须整包重装；
+    // 后两段（PATCH/BUILD）走增量热更新。
+    if (seg.index <= 1) {
       if (!installerItem) return res.status(400).send(error("该源暂无适用于当前系统的安装包"));
       return res
         .status(200)
         .send(success({ needUpdate: true, latestVersion: tagger, reinstall: true, time, url: installerItem.url, version: tagger }));
     }
-    //对比Minor
-    if (taggerList[1] > currentVersionList[1]) {
-      if (!installerItem) return res.status(400).send(error("该源暂无适用于当前系统的安装包"));
-      return res
-        .status(200)
-        .send(success({ needUpdate: true, latestVersion: tagger, reinstall: true, time, url: installerItem.url, version: tagger }));
-    }
-    //Patch
-    if (taggerList[2] > currentVersionList[2]) {
-      if (!zipItem) return res.status(400).send(error("该源暂无增量更新包"));
-      return res.status(200).send(success({ needUpdate: true, latestVersion: tagger, reinstall: false, time, url: zipItem.url, version: tagger }));
-    }
-    return res.status(200).send(success({ needUpdate: false, latestVersion: tagger, reinstall: false, time, version: tagger }));
+    if (!zipItem) return res.status(400).send(error("该源暂无增量更新包"));
+    return res.status(200).send(success({ needUpdate: true, latestVersion: tagger, reinstall: false, time, url: zipItem.url, version: tagger }));
   },
 );

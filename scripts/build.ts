@@ -9,6 +9,13 @@ if (!process.env.NODE_ENV) {
 
 const pkg = JSON.parse(fs.readFileSync(path.resolve("package.json"), "utf8"));
 
+// 客户端自报版本。默认取 package.json，但允许用 APP_VERSION 覆盖成四段式
+// （如 1.1.8.1）——前三段与上游 Toonflow 对齐，第四段是本仓的定制迭代号。
+// 之所以不直接写进 package.json：electron-builder 校验 semver，
+// 四段版本会以 `Invalid version: "1.1.8.1"` 直接构建失败。
+// 比较逻辑见 src/routes/setting/about/checkUpdate.ts 的 parseVersion。
+const appVersion = process.env.APP_VERSION || pkg.version;
+
 const external = [
   "electron",
   "@huggingface/transformers",
@@ -43,7 +50,7 @@ const appBuildConfig: esbuild.BuildOptions = {
   sourcemap: false,
   external,
   define: {
-    __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_VERSION__: JSON.stringify(appVersion),
   },
 };
 
@@ -64,7 +71,7 @@ const mainBuildConfig: esbuild.BuildOptions = {
   sourcemap: false,
   external,
   define: {
-    __APP_VERSION__: JSON.stringify(pkg.version),
+    __APP_VERSION__: JSON.stringify(appVersion),
   },
 };
 

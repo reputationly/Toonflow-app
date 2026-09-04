@@ -20,8 +20,62 @@ env:
   NODE_VERSION: "24"
 
 jobs:
+  # ==================== 版本号解析 ====================
+  # 独立成 job 供所有下游共享同一份版本号。必须集中解析：安装包（三个 build
+  # job）与增量包（publish-r2）都会把 __APP_VERSION__ 编进 data/serve/app.js，
+  # 两边取值不一致的话，用户装完立刻会被提示更新到自己刚装的那个版本。
+  #
+  # 版本号规则（详见 docs/技术评估与开发环境搭建.md §8.6）：
+  #   MAJOR.MINOR.PATCH  与上游 Toonflow 保持一致
+  #   .BUILD             本仓定制迭代号，上游未发版时递增它来推送自有修复
+  # tag 支持两种写法，都取其中的数字版本：
+  #   v1.1.8.1
+  #   v1.1.8.1-ovj-20260904-18e15e4   （沿用 new-api 的下游标识风格）
+  prepare:
+    runs-on: ubuntu-latest
+    name: 解析版本号
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+      app_version: ${{ steps.ver.outputs.app_version }}
+      manifest_key: ${{ steps.ver.outputs.manifest_key }}
+      prefix: ${{ steps.ver.outputs.prefix }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 解析版本号与目标前缀
+        id: ver
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "version=${PKG}-dryrun" >> "$GITHUB_OUTPUT"
+            echo "app_version=${PKG}" >> "$GITHUB_OUTPUT"
+            echo "manifest_key=dry-run/update.json" >> "$GITHUB_OUTPUT"
+            echo "prefix=dry-run/" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          RAW="${GITHUB_REF_NAME#v}"
+          VERSION="${RAW%%-*}"          # 去掉 -ovj-2026... 之类的下游标识
+          if ! printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$'; then
+            echo "::error::tag 版本号非法：'$VERSION'（需为 X.Y.Z 或 X.Y.Z.N 纯数字）"
+            exit 1
+          fi
+          # 前三段必须与 package.json 一致，否则安装包文件名（electron-builder 用
+          # package.json）与清单里的 URL 会对不上，发出去的 update.json 直接 404。
+          if [ "$(printf '%s' "$VERSION" | cut -d. -f1-3)" != "$PKG" ]; then
+            echo "::error::tag 前三段 $(printf '%s' "$VERSION" | cut -d. -f1-3) 与 package.json 的 $PKG 不一致，请先同步 package.json"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "app_version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "manifest_key=update.json" >> "$GITHUB_OUTPUT"
+          echo "prefix=" >> "$GITHUB_OUTPUT"
+          echo "✅ 清单版本 $VERSION（package.json $PKG）"
+
   # ==================== Windows 构建 ====================
   build-Windows:
+    needs: prepare
     # 空跑时跳过平台构建，只验证 R2 分发链路
     if: ${{ !inputs.dry_run }}
     strategy:
@@ -52,6 +106,9 @@ jobs:
         run: yarn dist:win --${{ matrix.arch }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 与 publish-r2 的增量包保持同一版本号，否则安装包自报三段版本、
+          # 清单写四段版本，用户装完立刻被提示更新到刚装的那个版本。
+          APP_VERSION: ${{ needs.prepare.outputs.app_version }}
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
@@ -62,6 +119,7 @@ jobs:
 
   # ==================== macOS 构建 ====================
   build-macOS:
+    needs: prepare
     if: ${{ !inputs.dry_run }}
     strategy:
       fail-fast: false
@@ -100,6 +158,9 @@ jobs:
         run: yarn dist:mac --${{ matrix.arch }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 与 publish-r2 的增量包保持同一版本号，否则安装包自报三段版本、
+          # 清单写四段版本，用户装完立刻被提示更新到刚装的那个版本。
+          APP_VERSION: ${{ needs.prepare.outputs.app_version }}
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
@@ -110,6 +171,7 @@ jobs:
 
   # ==================== Linux 构建 ====================
   build-Linux:
+    needs: prepare
     if: ${{ !inputs.dry_run }}
     strategy:
       fail-fast: false
@@ -146,6 +208,9 @@ jobs:
         run: yarn dist:linux --${{ matrix.arch }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 与 publish-r2 的增量包保持同一版本号，否则安装包自报三段版本、
+          # 清单写四段版本，用户装完立刻被提示更新到刚装的那个版本。
+          APP_VERSION: ${{ needs.prepare.outputs.app_version }}
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
@@ -163,7 +228,7 @@ jobs:
   #   Variables — R2_PUBLIC_BASE（R2 的公开访问地址，不带结尾斜杠，
   #               如 https://dl.example.com 或 https://pub-xxx.r2.dev）
   publish-r2:
-    needs: [build-Windows, build-macOS, build-Linux]
+    needs: [prepare, build-Windows, build-macOS, build-Linux]
     runs-on: ubuntu-latest
     name: 发布到 Cloudflare R2
     # always() 是必需的：空跑时三个 build job 被 skip，没有它本 job 会跟着被 skip。
@@ -189,28 +254,20 @@ jobs:
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
 
-      - name: 构建后端产物
-        run: yarn build
-
       - name: 下载所有构建产物
         if: ${{ !inputs.dry_run }}
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      # 空跑写到 dry-run/ 前缀下，绝不碰生产的 update.json；版本号取 package.json。
-      - name: 解析版本号与目标前缀
-        id: ver
-        run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            echo "version=$(node -p "require('./package.json').version")-dryrun" >> "$GITHUB_OUTPUT"
-            echo "manifest_key=dry-run/update.json" >> "$GITHUB_OUTPUT"
-            echo "prefix=dry-run/" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-            echo "manifest_key=update.json" >> "$GITHUB_OUTPUT"
-            echo "prefix=" >> "$GITHUB_OUTPUT"
-          fi
+
+      # 必须在解析版本号之后：APP_VERSION 会被 esbuild 注入成 __APP_VERSION__，
+      # 决定客户端自报的版本。不传就回落到 package.json（三段），那样定制迭代
+      # 更新完客户端仍自报 1.1.8，会对同一个版本反复提示更新。
+      - name: 构建后端产物
+        run: yarn build
+        env:
+          APP_VERSION: ${{ needs.prepare.outputs.app_version }}
 
       # 增量包 = data/ 的内容（注意是内容不是目录本身）。
       # 客户端 downloadApp.ts 会解压到 data/temp/ 再 cpSync 覆盖 data/，
@@ -239,11 +296,11 @@ jobs:
       - name: 生成 update.json
         env:
           PUBLIC_BASE: ${{ vars.R2_PUBLIC_BASE }}
-          VERSION: ${{ steps.ver.outputs.version }}
+          VERSION: ${{ needs.prepare.outputs.version }}
           # PREFIX 必须和「上传到 R2」用的 S3 key 前缀一致，否则空跑清单会指向
           # 不存在的对象（对象在 dry-run/$VERSION/，URL 却写成 /$VERSION/），
           # 导致回读校验必然 404。生产路径下 PREFIX 为空串，行为不变。
-          PREFIX: ${{ steps.ver.outputs.prefix }}
+          PREFIX: ${{ needs.prepare.outputs.prefix }}
         run: |
           cd release
           node -e '
@@ -284,9 +341,9 @@ jobs:
           AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
           ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
           BUCKET: ${{ secrets.R2_BUCKET }}
-          VERSION: ${{ steps.ver.outputs.version }}
-          PREFIX: ${{ steps.ver.outputs.prefix }}
-          MANIFEST_KEY: ${{ steps.ver.outputs.manifest_key }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          PREFIX: ${{ needs.prepare.outputs.prefix }}
+          MANIFEST_KEY: ${{ needs.prepare.outputs.manifest_key }}
         run: |
           cd release
           # 版本目录：安装包与增量包按版本号归档，历史版本可回溯
@@ -304,8 +361,8 @@ jobs:
       - name: 回读校验
         env:
           PUBLIC_BASE: ${{ vars.R2_PUBLIC_BASE }}
-          MANIFEST_KEY: ${{ steps.ver.outputs.manifest_key }}
-          VERSION: ${{ steps.ver.outputs.version }}
+          MANIFEST_KEY: ${{ needs.prepare.outputs.manifest_key }}
+          VERSION: ${{ needs.prepare.outputs.version }}
         run: |
           URL="${PUBLIC_BASE%/}/$MANIFEST_KEY"
           echo "回读 $URL"
