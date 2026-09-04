@@ -21,8 +21,12 @@ const external = [
   "@huggingface/transformers",
   "onnxruntime-node",
   "vm2",
-  "sqlite3",
   "better-sqlite3",
+  // sqlite3 已从 dependencies 移除（项目用 better-sqlite3，它只是 @rmp135/sql-ts
+  // 的可选 peer，且在 Windows ARM64 上没有预编译包、需现场 node-gyp 编译而构建失败）。
+  // 但仍须留在 external：knex 的 sqlite3 方言里有静态 require('sqlite3')，
+  // 不标 external 的话 esbuild 解析不到会直接报错。mysql / pg / oracledb 同理。
+  "sqlite3",
   "sharp",
   "mysql",
   "mysql2",
