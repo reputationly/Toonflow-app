@@ -19,23 +19,66 @@ const APP_VERSION: string = (() => {
   return pkg.version;
 })();
 
+// 更新清单地址。默认指向自建的 Cloudflare R2；可用环境变量覆盖，便于
+// 私有化部署各自指向自己的分发桶，无需改代码重新打包。
+// 清单结构见 docs/技术评估与开发环境搭建.md §8。
+const DEFAULT_MANIFEST_URL = process.env.UPDATE_MANIFEST_URL || "https://aijisuan.kdns.fr/update.json";
+
 export default router.post(
   "/",
   validateFields({
+    // source 是清单 data 对象里的键名，不是「下载渠道」。前端目前只启用了一个源
+    // （web/src/components/setting/components/about.vue 里 github/gitee/atomgit
+    // 均为 disabled:true），保留原枚举是为了不破坏既有前端产物的兼容性。
     source: z.enum(["toonflow", "github", "gitee", "atomgit"]),
     url: z.url().nullable().optional(),
   }),
   async (req, res) => {
     const { source, url } = req.body;
 
-    const getUrl = url ?? "https://toonflow.oss-cn-beijing.aliyuncs.com/update.json";
+    const getUrl = url ?? DEFAULT_MANIFEST_URL;
 
-    const versionInfo = await fetch(getUrl).then((res) => res.json());
-    if (!versionInfo) return res.status(400).send(error("无法获取版本信息"));
-    const { version: tagger, time, data } = versionInfo;
+    // 工作台会在后台静默调用本接口（web/src/pages/workbench/index.vue checkVersion）。
+    // 网络不可达 / 超时 / 返回非 JSON 时不能把异常抛给全局错误处理器：那会返回 500，
+    // 前端拿到的 data 为 undefined，读 data.needUpdate 又会触发一次未捕获的 promise 拒绝。
+    // 这里统一降级为「已是最新」并带 reachable=false，让后台轮询安静地跳过。
+    let versionInfo: any;
+    try {
+      const resp = await fetch(getUrl, { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      versionInfo = await resp.json();
+    } catch (err: any) {
+      return res.status(200).send(
+        success({
+          needUpdate: false,
+          latestVersion: APP_VERSION,
+          reinstall: false,
+          time: 0,
+          version: APP_VERSION,
+          reachable: false,
+          message: `无法连接更新服务器：${err?.message ?? "未知错误"}`,
+        }),
+      );
+    }
+
+    const { version: tagger, time, data } = versionInfo ?? {};
+    // 清单结构不合预期时同样降级，避免 tagger.split / data[source] 直接抛。
+    if (typeof tagger !== "string" || !data || typeof data !== "object") {
+      return res.status(200).send(
+        success({
+          needUpdate: false,
+          latestVersion: APP_VERSION,
+          reinstall: false,
+          time: 0,
+          version: APP_VERSION,
+          reachable: false,
+          message: "更新清单格式不正确",
+        }),
+      );
+    }
 
     const sourceData = data[source];
-    if (!sourceData) return res.status(400).send(error("无法获取该源的下载信息"));
+    if (!Array.isArray(sourceData)) return res.status(400).send(error("无法获取该源的下载信息"));
 
     const platformType: Record<string, string> = {
       win32: "windows",
