@@ -11,7 +11,7 @@ on:
         required: false
         type: string
       dry_run:
-        description: "空跑：跳过 6 个平台构建，只验证 R2 分发链路（约 2 分钟）"
+        description: "空跑：跳过平台构建，只验证 R2 分发链路（约 2 分钟）"
         required: false
         default: false
         type: boolean
@@ -21,7 +21,7 @@ env:
 
 jobs:
   # ==================== 版本号解析 ====================
-  # 独立成 job 供所有下游共享同一份版本号。必须集中解析：安装包（三个 build
+  # 独立成 job 供所有下游共享同一份版本号。必须集中解析：安装包（各 build
   # job）与增量包（publish-r2）都会把 __APP_VERSION__ 编进 data/serve/app.js，
   # 两边取值不一致的话，用户装完立刻会被提示更新到自己刚装的那个版本。
   #
@@ -169,56 +169,6 @@ jobs:
           path: dist/*.dmg
           retention-days: 7
 
-  # ==================== Linux 构建 ====================
-  build-Linux:
-    needs: prepare
-    if: ${{ !inputs.dry_run }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: x64
-            name: x64
-          - arch: arm64
-            name: ARM64
-
-    runs-on: ubuntu-latest
-    name: 构建 Linux (${{ matrix.name }})
-
-    steps:
-      - name: 检出代码
-        uses: actions/checkout@v4
-
-      - name: 配置 Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: 安装依赖
-        run: yarn install --frozen-lockfile
-        env:
-          npm_config_arch: ${{ matrix.arch }}
-
-      - name: 安装目标平台 sharp
-        if: matrix.arch == 'arm64'
-        run: |
-          npm install --no-save --ignore-scripts --force @img/sharp-linux-arm64 @img/sharp-libvips-linux-arm64
-
-      - name: 打包 Linux 安装程序
-        run: yarn dist:linux --${{ matrix.arch }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 与 publish-r2 的增量包保持同一版本号，否则安装包自报三段版本、
-          # 清单写四段版本，用户装完立刻被提示更新到刚装的那个版本。
-          APP_VERSION: ${{ needs.prepare.outputs.app_version }}
-
-      - name: 上传构建产物
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-${{ matrix.arch }}
-          path: dist/*.AppImage
-          retention-days: 7
-
   # ==================== 发布到 Cloudflare R2 ====================
   # 自建分发：增量热更新包 latest.zip + 完整安装包 + 版本清单 update.json 全部放 R2。
   # 客户端 src/routes/setting/about/checkUpdate.ts 读 update.json 判断是否需要更新。
@@ -228,15 +178,15 @@ jobs:
   #   Variables — R2_PUBLIC_BASE（R2 的公开访问地址，不带结尾斜杠，
   #               如 https://dl.example.com 或 https://pub-xxx.r2.dev）
   publish-r2:
-    needs: [prepare, build-Windows, build-macOS, build-Linux]
+    needs: [prepare, build-Windows, build-macOS]
     runs-on: ubuntu-latest
     name: 发布到 Cloudflare R2
-    # always() 是必需的：空跑时三个 build job 被 skip，没有它本 job 会跟着被 skip。
+    # always() 是必需的：空跑时 build job 被 skip，没有它本 job 会跟着被 skip。
     # 但 always() 同时会放行「needs 失败」的情况，所以必须显式排除 failure——
     # 否则某个平台构建挂了仍会覆盖生产 update.json，客户端被告知有新版本
     # （patch 号还会立即热更新），而 release job 因默认门槛正确跳过，
     # 造成「有清单无 Release」且失败平台的用户撞上 400 该源暂无适用于当前系统的安装包。
-    # 空跑时三个 job 的 result 是 skipped 而非 failure，不受影响。
+    # 空跑时 build job 的 result 是 skipped 而非 failure，不受影响。
     if: ${{ always() && !contains(needs.*.result, 'failure') && (startsWith(github.ref, 'refs/tags/') || inputs.dry_run) }}
 
     steps:
@@ -286,7 +236,7 @@ jobs:
       - name: 整理安装包
         if: ${{ !inputs.dry_run }}
         run: |
-          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" \) \
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" \) \
             -exec cp {} release/ \;
           ls -lh release/
 
@@ -315,7 +265,6 @@ jobs:
             const map = {
               windows: pick(/win-x64.*\.exe$/i),
               macos: pick(/mac-arm64.*\.dmg$/i),
-              linux: pick(/x86_64.*\.AppImage$/i) || pick(/linux.*\.AppImage$/i),
             };
             for (const [type, f] of Object.entries(map)) {
               if (f) items.push({ type, url: url(f) });
@@ -382,6 +331,53 @@ jobs:
           SIZE=$(curl -fsSI --retry 3 "$ZIP_URL" | awk 'tolower($1)=="content-length:"{print $2}' | tr -d '\r')
           echo "✅ latest.zip 可公开下载，大小 $((SIZE/1024/1024)) MB"
 
+      # 每个版本约 550 MB（win-x64 + win-arm64 + mac-arm64 + mac-x64 + latest.zip），
+      # 不清理的话 R2 的 10 GB 免费额度约 18 版就满。
+      #
+      # 按「数量」保留而不是用 R2 生命周期规则按「天数」：后者有个陷阱——
+      # 若长期不发版，规则会把当前正在服役的版本一并删掉。
+      #
+      # 放在回读校验之后：确认新版本确实可公开下载，才动旧版本。
+      # 不加 always()：前面失败时保持现状，宁可多占空间也不误删。
+      - name: 清理旧版本（保留最近 3 个）
+        if: ${{ !inputs.dry_run }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+          KEEP: "3"
+          CURRENT: ${{ needs.prepare.outputs.version }}
+        run: |
+          # 只列顶层「目录」，dry-run/ 等非版本号前缀不会被下面的正则匹配
+          aws s3 ls "s3://$BUCKET/" --endpoint-url "$ENDPOINT" \
+            | awk '$1=="PRE"{print $2}' | tr -d '/' > all_prefixes.txt
+          echo "桶内前缀：$(tr '\n' ' ' < all_prefixes.txt)"
+
+          # 版本号逐段数值排序（sort -V 对四段号可靠），保留最新 KEEP 个
+          grep -E '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$' all_prefixes.txt \
+            | sort -V > versions.txt || true
+          TOTAL=$(wc -l < versions.txt | tr -d ' ')
+          echo "版本目录 $TOTAL 个，保留最近 $KEEP 个"
+          if [ "$TOTAL" -le "$KEEP" ]; then
+            echo "✅ 无需清理"
+            exit 0
+          fi
+          head -n "$((TOTAL - KEEP))" versions.txt > to_delete.txt
+          while read -r v; do
+            # 双保险：绝不删刚发布的这一版
+            if [ "$v" = "$CURRENT" ]; then
+              echo "⚠️  跳过当前版本 $v"
+              continue
+            fi
+            echo "删除旧版本 $v"
+            aws s3 rm "s3://$BUCKET/$v/" --recursive --endpoint-url "$ENDPOINT"
+          done < to_delete.txt
+          echo "✅ 清理完成，保留：$(tail -n "$KEEP" versions.txt | tr '\n' ' ')"
+
       # 空跑产物不留存，避免污染桶。
       # 必须带 always()：否则前面任何一步失败（这恰恰是空跑最可能的结果）
       # 本步就被跳过，dry-run/ 残留在桶里，与「不污染桶」的目标自相矛盾。
@@ -401,7 +397,7 @@ jobs:
 
   # ==================== 发布 ====================
   release:
-    needs: [build-Windows, build-macOS, build-Linux]
+    needs: [build-Windows, build-macOS]
     runs-on: ubuntu-latest
     name: 发布到 GitHub
     if: startsWith(github.ref, 'refs/tags/')
@@ -418,7 +414,7 @@ jobs:
       - name: 整理文件
         run: |
           mkdir -p dist
-          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" \) -exec mv {} dist/ \;
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" \) -exec mv {} dist/ \;
 
       - name: 显示待发布文件
         run: |
@@ -441,8 +437,6 @@ jobs:
             | 🪟 Windows | ARM64 | `ToonFlow-*-win-arm64-setup.exe` | 适用于 ARM 架构 Windows 设备 |
             | 🍎 macOS | Apple Silicon | `ToonFlow-*-mac-arm64.dmg` | 适用于 M1/M2/M3/M4 芯片的 Mac |
             | 🍎 macOS | Intel | `ToonFlow-*-mac-x64.dmg` | 适用于 Intel 芯片的 Mac |
-            | 🐧 Linux | x64 | `ToonFlow-*-linux-x86_64.AppImage` | 适用于大多数 Linux 发行版 |
-            | 🐧 Linux | ARM64 | `ToonFlow-*-linux-arm64.AppImage` | 适用于 ARM 架构的 Linux 设备 |
 
             > 💡 **不确定选哪个？** Windows 用户通常选 **win-x64-setup.exe**；Mac 用户查看「关于本机」：M 系列芯片选 **arm64.dmg**，Intel 选 **x64.dmg**。
 
@@ -450,7 +444,6 @@ jobs:
 
             - **Windows**：下载 `.exe` 文件，双击运行安装向导即可。如遇 DLL 缺失，请安装 [VC++ 运行库](https://aka.ms/vs/17/release/vc_redist.x64.exe)。
             - **macOS**：下载 `.dmg` 文件，打开后将应用拖入「应用程序」。首次打开如遇安全提示，前往「系统设置 → 隐私与安全性」允许运行。
-            - **Linux**：下载 `.AppImage`，执行 `chmod +x ToonFlow-*.AppImage` 后运行。
 
             ---
 
