@@ -10,6 +10,11 @@ on:
         description: "Version number (e.g., 1.0.0)"
         required: false
         type: string
+      dry_run:
+        description: "空跑：跳过 6 个平台构建，只验证 R2 分发链路（约 2 分钟）"
+        required: false
+        default: false
+        type: boolean
 
 env:
   NODE_VERSION: "24"
@@ -17,6 +22,8 @@ env:
 jobs:
   # ==================== Windows 构建 ====================
   build-Windows:
+    # 空跑时跳过平台构建，只验证 R2 分发链路
+    if: ${{ !inputs.dry_run }}
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +62,7 @@ jobs:
 
   # ==================== macOS 构建 ====================
   build-macOS:
+    if: ${{ !inputs.dry_run }}
     strategy:
       fail-fast: false
       matrix:
@@ -102,6 +110,7 @@ jobs:
 
   # ==================== Linux 构建 ====================
   build-Linux:
+    if: ${{ !inputs.dry_run }}
     strategy:
       fail-fast: false
       matrix:
@@ -144,6 +153,194 @@ jobs:
           name: linux-${{ matrix.arch }}
           path: dist/*.AppImage
           retention-days: 7
+
+  # ==================== 发布到 Cloudflare R2 ====================
+  # 自建分发：增量热更新包 latest.zip + 完整安装包 + 版本清单 update.json 全部放 R2。
+  # 客户端 src/routes/setting/about/checkUpdate.ts 读 update.json 判断是否需要更新。
+  #
+  # 需要在仓库配置：
+  #   Secrets — R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY / R2_BUCKET
+  #   Variables — R2_PUBLIC_BASE（R2 的公开访问地址，不带结尾斜杠，
+  #               如 https://dl.example.com 或 https://pub-xxx.r2.dev）
+  publish-r2:
+    needs: [build-Windows, build-macOS, build-Linux]
+    runs-on: ubuntu-latest
+    name: 发布到 Cloudflare R2
+    # always() 是必需的：空跑时三个 build job 被 skip，没有它本 job 会跟着被 skip。
+    # 但 always() 同时会放行「needs 失败」的情况，所以必须显式排除 failure——
+    # 否则某个平台构建挂了仍会覆盖生产 update.json，客户端被告知有新版本
+    # （patch 号还会立即热更新），而 release job 因默认门槛正确跳过，
+    # 造成「有清单无 Release」且失败平台的用户撞上 400 该源暂无适用于当前系统的安装包。
+    # 空跑时三个 job 的 result 是 skipped 而非 failure，不受影响。
+    if: ${{ always() && !contains(needs.*.result, 'failure') && (startsWith(github.ref, 'refs/tags/') || inputs.dry_run) }}
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # 只需要 esbuild 产出 data/serve/app.js，Electron 二进制用不到，跳过下载省 ~100MB
+      - name: 安装依赖
+        run: yarn install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      - name: 构建后端产物
+        run: yarn build
+
+      - name: 下载所有构建产物
+        if: ${{ !inputs.dry_run }}
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # 空跑写到 dry-run/ 前缀下，绝不碰生产的 update.json；版本号取 package.json。
+      - name: 解析版本号与目标前缀
+        id: ver
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            echo "version=$(node -p "require('./package.json').version")-dryrun" >> "$GITHUB_OUTPUT"
+            echo "manifest_key=dry-run/update.json" >> "$GITHUB_OUTPUT"
+            echo "prefix=dry-run/" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            echo "manifest_key=update.json" >> "$GITHUB_OUTPUT"
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 增量包 = data/ 的内容（注意是内容不是目录本身）。
+      # 客户端 downloadApp.ts 会解压到 data/temp/ 再 cpSync 覆盖 data/，
+      # 所以压缩包根目录下必须直接是 serve/ web/ skills/ 这些条目。
+      # 排除 models/（44MB ONNX 模型几乎不变，进增量包会让体积翻倍）
+      # 与用户数据（oss/ logs/ temp/ 数据库）。
+      - name: 打包增量更新包
+        run: |
+          mkdir -p release
+          cd data
+          zip -r -q ../release/latest.zip . \
+            -x "models/*" "oss/*" "logs/*" "temp/*" "*.sqlite" "*.sqlite-shm" "*.sqlite-wal"
+          cd ..
+          ls -lh release/latest.zip
+
+      - name: 整理安装包
+        if: ${{ !inputs.dry_run }}
+        run: |
+          find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" \) \
+            -exec cp {} release/ \;
+          ls -lh release/
+
+      # checkUpdate.ts 的 installerItem 按 process.platform 取单项（windows/macos/linux），
+      # 清单里没有架构维度，所以每个平台只能挂一个链接：Windows 取 x64、macOS 取 arm64。
+      # 其他架构的包仍会上传到 R2，用户可从下载页自取。
+      - name: 生成 update.json
+        env:
+          PUBLIC_BASE: ${{ vars.R2_PUBLIC_BASE }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          # PREFIX 必须和「上传到 R2」用的 S3 key 前缀一致，否则空跑清单会指向
+          # 不存在的对象（对象在 dry-run/$VERSION/，URL 却写成 /$VERSION/），
+          # 导致回读校验必然 404。生产路径下 PREFIX 为空串，行为不变。
+          PREFIX: ${{ steps.ver.outputs.prefix }}
+        run: |
+          cd release
+          node -e '
+            const fs = require("fs");
+            const base = process.env.PUBLIC_BASE.replace(/\/+$/, "");
+            const version = process.env.VERSION;
+            const prefix = process.env.PREFIX || "";
+            const files = fs.readdirSync(".");
+            const pick = (re) => files.find((f) => re.test(f));
+            const url = (f) => `${base}/${prefix}${version}/${f}`;
+            const items = [{ type: "zip", url: url("latest.zip") }];
+            const map = {
+              windows: pick(/win-x64.*\.exe$/i),
+              macos: pick(/mac-arm64.*\.dmg$/i),
+              linux: pick(/x86_64.*\.AppImage$/i) || pick(/linux.*\.AppImage$/i),
+            };
+            for (const [type, f] of Object.entries(map)) {
+              if (f) items.push({ type, url: url(f) });
+              else console.warn(`⚠️  未找到 ${type} 安装包，清单中将缺失该平台`);
+            }
+            const manifest = {
+              version,
+              time: Date.now(),
+              data: { toonflow: items, github: [], gitee: [], atomgit: [] },
+            };
+            fs.writeFileSync("update.json", JSON.stringify(manifest, null, 2));
+            console.log(JSON.stringify(manifest, null, 2));
+          '
+
+      # R2 兼容 S3 API，直接用 runner 自带的 aws cli。
+      # checksum 两项必须关掉：aws cli v2 默认发送 CRC32 尾部校验，R2 不支持会 501。
+      - name: 上传到 R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          PREFIX: ${{ steps.ver.outputs.prefix }}
+          MANIFEST_KEY: ${{ steps.ver.outputs.manifest_key }}
+        run: |
+          cd release
+          # 版本目录：安装包与增量包按版本号归档，历史版本可回溯
+          aws s3 cp . "s3://$BUCKET/$PREFIX$VERSION/" --recursive \
+            --exclude "update.json" --endpoint-url "$ENDPOINT"
+          # 清单不缓存，客户端固定读这一个地址（空跑写到 dry-run/ 下）
+          aws s3 cp update.json "s3://$BUCKET/$MANIFEST_KEY" \
+            --content-type application/json \
+            --cache-control "no-cache, max-age=0" \
+            --endpoint-url "$ENDPOINT"
+          echo "✅ 已上传：${{ vars.R2_PUBLIC_BASE }}/$MANIFEST_KEY"
+
+      # 从公开域名把刚写的清单读回来，确认自定义域映射与缓存策略都正确。
+      # 这一步能抓到「上传成功但公网读不到」这类只在真发版本时才暴露的问题。
+      - name: 回读校验
+        env:
+          PUBLIC_BASE: ${{ vars.R2_PUBLIC_BASE }}
+          MANIFEST_KEY: ${{ steps.ver.outputs.manifest_key }}
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          URL="${PUBLIC_BASE%/}/$MANIFEST_KEY"
+          echo "回读 $URL"
+          curl -fsS --retry 3 --retry-delay 2 "$URL" -o fetched.json
+          echo "--- 缓存响应头 ---"
+          curl -fsSI "$URL" | grep -iE "cache-control|cf-cache-status|content-type" || true
+          node -e '
+            const m = require("./fetched.json");
+            const expect = process.env.VERSION;
+            if (m.version !== expect) throw new Error(`版本不符：清单=${m.version} 期望=${expect}`);
+            const zip = (m.data.toonflow || []).find((i) => i.type === "zip");
+            if (!zip) throw new Error("清单里没有 zip 增量包项");
+            console.log("✅ 清单校验通过：version=" + m.version + "，条目 " + m.data.toonflow.length + " 项");
+          '
+          ZIP_URL=$(node -p "require('./fetched.json').data.toonflow.find(i=>i.type==='zip').url")
+          echo "回读增量包 $ZIP_URL"
+          SIZE=$(curl -fsSI --retry 3 "$ZIP_URL" | awk 'tolower($1)=="content-length:"{print $2}' | tr -d '\r')
+          echo "✅ latest.zip 可公开下载，大小 $((SIZE/1024/1024)) MB"
+
+      # 空跑产物不留存，避免污染桶。
+      # 必须带 always()：否则前面任何一步失败（这恰恰是空跑最可能的结果）
+      # 本步就被跳过，dry-run/ 残留在桶里，与「不污染桶」的目标自相矛盾。
+      - name: 清理空跑产物
+        if: ${{ always() && inputs.dry_run }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          BUCKET: ${{ secrets.R2_BUCKET }}
+        run: |
+          aws s3 rm "s3://$BUCKET/dry-run/" --recursive --endpoint-url "$ENDPOINT"
+          echo "✅ 空跑产物已清理，生产 update.json 未被触碰"
 
   # ==================== 发布 ====================
   release:
