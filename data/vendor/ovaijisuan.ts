@@ -197,8 +197,24 @@ const vendor: VendorConfig = {
 // ============================================================
 // 工具函数
 // ============================================================
-/** qwen-image-edit 的参考图硬上限，超出时上游返回 500「图片编辑最多支持 5 张底图」 */
-const MAX_EDIT_REFS = 5;
+/**
+ * 各图像编辑模型的参考图上限（实测值，2026-09）。
+ *
+ * 注意有两层限制，且两者不一致：
+ *   1. New API 网关统一按 5 张拦截 → 「图片编辑最多支持 5 张底图,当前 N 张」
+ *   2. 模型引擎自身的上限可能更小 → 「Engine rejected task: Received N input images」
+ * 例如 hunyuan-image-3 能过网关（≤5）却被引擎拒（>3），所以必须按模型区分。
+ */
+const EDIT_REF_LIMITS: Record<string, number> = {
+  "qwen-image-edit": 5, // 实测 5 张成功、6 张被网关拒
+  "hunyuan-image-3": 3, // 实测 3 张成功、4 张被引擎拒（网关放行了）
+};
+/** 未在上表登记的模型按网关上限兜底 */
+const DEFAULT_EDIT_REFS = 5;
+
+function maxRefsFor(modelName: string): number {
+  return EDIT_REF_LIMITS[modelName] ?? DEFAULT_EDIT_REFS;
+}
 
 /**
  * 截断参考图后，把提示词里指向已丢弃图片的 `@图N` 引用一并去掉。
@@ -311,18 +327,18 @@ const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<str
   const all = imageBase64List(config);
 
   // 上游 batchGenerateImage.ts 不限制参考图数量，分镜引用几个资产就传几张，
-  // 而 qwen-image-edit 硬上限是 5 张，超出直接 500：
-  //   图片编辑最多支持 5 张底图,当前 6 张
+  // 而各编辑模型的参考图上限不同（见 EDIT_REF_LIMITS），超出直接 500。
   // 实测 34 个分镜里 15 个因此失败。在供应商侧兜底截断，避免改上游代码。
   //
   // 保留前 5 张：上游按「角色 → 场景 → 道具」的顺序拼装 @图N，
   // 截断尾部即优先保住角色一致性（最影响观感的那部分）。
-  const refs = all.slice(0, MAX_EDIT_REFS);
+  const maxRefs = maxRefsFor(model.modelName);
+  const refs = all.slice(0, maxRefs);
   // 提示词里的 @图6、@图7 等指代已被截掉的图，留着会让模型引用不存在的对象，
   // 一并从提示词中移除。
-  const prompt = all.length > MAX_EDIT_REFS ? stripDroppedRefs(config.prompt, MAX_EDIT_REFS) : config.prompt;
-  if (all.length > MAX_EDIT_REFS) {
-    logger(`[ovaijisuan] 参考图 ${all.length} 张超出上限，截断为 ${MAX_EDIT_REFS} 张`);
+  const prompt = all.length > maxRefs ? stripDroppedRefs(config.prompt, maxRefs) : config.prompt;
+  if (all.length > maxRefs) {
+    logger(`[ovaijisuan] ${model.modelName} 参考图 ${all.length} 张超出上限，截断为 ${maxRefs} 张`);
   }
 
   // 有参考图 → multipart /images/edits
