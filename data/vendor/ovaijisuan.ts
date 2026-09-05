@@ -206,8 +206,9 @@ const vendor: VendorConfig = {
  * 例如 hunyuan-image-3 能过网关（≤5）却被引擎拒（>3），所以必须按模型区分。
  */
 const EDIT_REF_LIMITS: Record<string, number> = {
-  "qwen-image-edit": 5, // 实测 5 张成功、6 张被网关拒
+  "qwen-image-edit": 5, // 实测 5 张成功、6 张被网关拒（与网关一致）
   "hunyuan-image-3": 3, // 实测 3 张成功、4 张被引擎拒（网关放行了）
+  "sensenova-u1.5": 1, // 实测仅单图，≥2 张即被引擎拒「Received multiple input images」
 };
 /** 未在上表登记的模型按网关上限兜底 */
 const DEFAULT_EDIT_REFS = 5;
