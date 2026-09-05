@@ -48,10 +48,12 @@ jobs:
         run: |
           PKG=$(node -p "require('./package.json').version")
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            echo "version=${PKG}-dryrun" >> "$GITHUB_OUTPUT"
-            echo "app_version=${PKG}" >> "$GITHUB_OUTPUT"
-            echo "manifest_key=dry-run/update.json" >> "$GITHUB_OUTPUT"
-            echo "prefix=dry-run/" >> "$GITHUB_OUTPUT"
+            {
+              echo "version=${PKG}-dryrun"
+              echo "app_version=${PKG}"
+              echo "manifest_key=dry-run/update.json"
+              echo "prefix=dry-run/"
+            } >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -67,10 +69,12 @@ jobs:
             echo "::error::tag 前三段 $(printf '%s' "$VERSION" | cut -d. -f1-3) 与 package.json 的 $PKG 不一致，请先同步 package.json"
             exit 1
           fi
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "app_version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "manifest_key=update.json" >> "$GITHUB_OUTPUT"
-          echo "prefix=" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$VERSION"
+            echo "app_version=$VERSION"
+            echo "manifest_key=update.json"
+            echo "prefix="
+          } >> "$GITHUB_OUTPUT"
           echo "✅ 清单版本 $VERSION（package.json $PKG）"
 
   # ==================== Windows 构建 ====================
@@ -253,6 +257,7 @@ jobs:
           PREFIX: ${{ needs.prepare.outputs.prefix }}
         run: |
           cd release
+          # shellcheck disable=SC2016  # node -e 里的 ${} 是 JS 模板字符串，不应被 shell 展开
           node -e '
             const fs = require("fs");
             const base = process.env.PUBLIC_BASE.replace(/\/+$/, "");
@@ -318,6 +323,7 @@ jobs:
           curl -fsS --retry 3 --retry-delay 2 "$URL" -o fetched.json
           echo "--- 缓存响应头 ---"
           curl -fsSI "$URL" | grep -iE "cache-control|cf-cache-status|content-type" || true
+          # shellcheck disable=SC2016  # 同上，模板字符串
           node -e '
             const m = require("./fetched.json");
             const expect = process.env.VERSION;

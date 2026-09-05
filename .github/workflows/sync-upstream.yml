@@ -45,8 +45,8 @@ jobs:
       - name: 检查是否有新提交
         id: check
         run: |
-          BEHIND=$(git rev-list --count HEAD..upstream/$UPSTREAM_BRANCH)
-          AHEAD=$(git rev-list --count upstream/$UPSTREAM_BRANCH..HEAD)
+          BEHIND=$(git rev-list --count "HEAD..upstream/$UPSTREAM_BRANCH")
+          AHEAD=$(git rev-list --count "upstream/$UPSTREAM_BRANCH..HEAD")
           echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
           echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
           echo "落后上游 $BEHIND 个提交，本仓领先 $AHEAD 个"
@@ -57,7 +57,7 @@ jobs:
 
           # 上游 package.json 的版本号——决定同步后是否要抬 package.json，
           # 进而影响 yarn release 算出的迭代号（见 docs/发版指南.md 版本号规则）
-          UP_VER=$(git show upstream/$UPSTREAM_BRANCH:package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          UP_VER=$(git show "upstream/$UPSTREAM_BRANCH:package.json" | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
           OUR_VER=$(node -p "require('./package.json').version")
           echo "upstream_version=$UP_VER" >> "$GITHUB_OUTPUT"
           echo "our_version=$OUR_VER" >> "$GITHUB_OUTPUT"
@@ -71,7 +71,7 @@ jobs:
           echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
           git checkout -B "$BRANCH"
 
-          if git merge upstream/$UPSTREAM_BRANCH --no-edit -m "chore: 同步上游 $UPSTREAM_BRANCH"; then
+          if git merge "upstream/$UPSTREAM_BRANCH" --no-edit -m "chore: 同步上游 $UPSTREAM_BRANCH"; then
             echo "conflict=false" >> "$GITHUB_OUTPUT"
             echo "✅ 合并成功"
           else

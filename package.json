@@ -33,7 +33,9 @@
     "debug:ai": "npx @ai-sdk/devtools",
     "license": "node scripts/license.ts",
     "vendor2json": "node scripts/vendor2json.ts",
-    "release": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.ts"
+    "release": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.ts",
+    "lint:workflows": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/lint-workflows.ts",
+    "lint:all": "yarn lint && yarn lint:workflows"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.35",

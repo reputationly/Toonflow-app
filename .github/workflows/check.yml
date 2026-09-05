@@ -1,0 +1,88 @@
+name: 代码检查
+
+# 防呆闸门：把「只有 CI 跑起来才会暴露」的问题挡在合并之前。
+#
+# 起因是发第一版时连挂三轮——两次是依赖问题（sqlite3 无 arm64 预编译包、
+# lzma-native 撞 Python 3.12 移除 distutils），一次是 gh 在 fork 里
+# 默认操作上游仓库。每次都要等十几分钟构建完才看到失败。
+#
+# 依赖问题只能靠真跑，但 workflow 本身的错误可以静态查出来。
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/**"
+      - "src/**"
+      - "scripts/**"
+      - "package.json"
+      - "tsconfig.json"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  workflows:
+    runs-on: ubuntu-latest
+    name: workflow 检查
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # 语法、表达式引用、shellcheck。
+      # 实测能抓到「prepare 的 outputs 引用了 needs.prepare」这类自引用错误：
+      #   property "prepare" is not defined in object type {}
+      - name: actionlint
+        uses: raven-actions/actionlint@v2
+        with:
+          fail-on-error: true
+
+      # 项目特有的语义规则，见 scripts/lint-workflows.ts
+      - name: 防呆规则
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/lint-workflows.ts
+
+  types:
+    runs-on: ubuntu-latest
+    name: 类型检查
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      # 只做类型检查与 esbuild 打包，用不到 Electron 二进制，省 ~100MB 下载
+      - name: 安装依赖
+        run: yarn install --frozen-lockfile
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+
+      - name: tsc --noEmit
+        run: yarn lint
+
+      # 构建能过才说明 external 列表、生成物路径这些没被改坏。
+      # 曾因把 sqlite3 从 external 移除导致 esbuild 解析 knex 方言失败。
+      - name: 构建后端产物
+        run: yarn build
+
+      # src/lib/vendor.json 是内置供应商的交付载体，只改 data/vendor/*.ts
+      # 而忘记重新生成的话，新用户装上不会有该供应商。
+      - name: vendor.json 是否与 data/vendor 同步
+        run: |
+          cp src/lib/vendor.json /tmp/vendor.before.json
+          yarn vendor2json
+          if ! diff -q /tmp/vendor.before.json src/lib/vendor.json >/dev/null; then
+            echo "::error::src/lib/vendor.json 与 data/vendor/*.ts 不同步，请跑 yarn vendor2json 后提交"
+            diff <(node -p "Object.keys(require('/tmp/vendor.before.json')).join('\n')") \
+                 <(node -p "Object.keys(require('./src/lib/vendor.json')).join('\n')") || true
+            exit 1
+          fi
+          echo "✅ vendor.json 已同步"

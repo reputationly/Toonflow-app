@@ -149,6 +149,8 @@ jobs:
     needs: [build-Windows, build-macOS, build-Linux]
     runs-on: ubuntu-latest
     name: 构建摘要
+    # lint-workflows-allow: always-needs-failure-guard  本 job 就是要在任何构建结果下都输出摘要，
+    # 正文读的正是 needs.*.result，排除 failure 反而失去意义
     if: always()
 
     steps:
