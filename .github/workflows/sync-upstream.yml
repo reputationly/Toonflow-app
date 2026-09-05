@@ -8,9 +8,10 @@ name: 同步上游
 #
 # 冲突时不强推，转为开 issue 提醒手工处理。
 
+# 纯手动触发：Actions → 同步上游 → Run workflow。
+# 不设 schedule —— 上游发版节奏不快（v1.1.7 → v1.1.8 隔了一个多月），
+# 定时跑只会攒下一堆没人看的 PR。需要同步时手动点一次即可。
 on:
-  schedule:
-    - cron: "0 3 * * 1" # 每周一 03:00 UTC（北京时间 11:00）
   workflow_dispatch:
 
 permissions:
