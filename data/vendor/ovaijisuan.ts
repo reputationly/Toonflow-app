@@ -197,6 +197,24 @@ const vendor: VendorConfig = {
 // ============================================================
 // 工具函数
 // ============================================================
+/** qwen-image-edit 的参考图硬上限，超出时上游返回 500「图片编辑最多支持 5 张底图」 */
+const MAX_EDIT_REFS = 5;
+
+/**
+ * 截断参考图后，把提示词里指向已丢弃图片的 `@图N` 引用一并去掉。
+ * 上游拼装格式形如：`@图1 为林深角色 @图2 为陈锐角色 @图6 为白瓷水杯 ...`
+ * 留着 @图6 会让模型去找不存在的参考对象，反而干扰生成。
+ */
+function stripDroppedRefs(prompt: string, keep: number): string {
+  return String(prompt)
+    // 整段移除 "@图N 为XXX"（N > keep），描述持续到下一个 @图 或断句符
+    .replace(/@图(\d+)\s*为[^@，,。\n]*/g, (whole, n) => (Number(n) > keep ? "" : whole))
+    // 移除残留的裸引用
+    .replace(/@图(\d+)/g, (whole, n) => (Number(n) > keep ? "" : whole))
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
 function creds(): { apiKey: string; baseUrl: string } {
   const raw = vendor.inputValues.apiKey;
   if (!raw) throw new Error("缺少 API Key");
@@ -290,13 +308,28 @@ const textRequest = (model: TextModel, _think: boolean, _thinkLevel: 0 | 1 | 2 |
 
 const imageRequest = async (config: ImageConfig, model: ImageModel): Promise<string> => {
   const { apiKey, baseUrl } = creds();
-  const refs = imageBase64List(config);
+  const all = imageBase64List(config);
+
+  // 上游 batchGenerateImage.ts 不限制参考图数量，分镜引用几个资产就传几张，
+  // 而 qwen-image-edit 硬上限是 5 张，超出直接 500：
+  //   图片编辑最多支持 5 张底图,当前 6 张
+  // 实测 34 个分镜里 15 个因此失败。在供应商侧兜底截断，避免改上游代码。
+  //
+  // 保留前 5 张：上游按「角色 → 场景 → 道具」的顺序拼装 @图N，
+  // 截断尾部即优先保住角色一致性（最影响观感的那部分）。
+  const refs = all.slice(0, MAX_EDIT_REFS);
+  // 提示词里的 @图6、@图7 等指代已被截掉的图，留着会让模型引用不存在的对象，
+  // 一并从提示词中移除。
+  const prompt = all.length > MAX_EDIT_REFS ? stripDroppedRefs(config.prompt, MAX_EDIT_REFS) : config.prompt;
+  if (all.length > MAX_EDIT_REFS) {
+    logger(`[ovaijisuan] 参考图 ${all.length} 张超出上限，截断为 ${MAX_EDIT_REFS} 张`);
+  }
 
   // 有参考图 → multipart /images/edits
   if (refs.length > 0) {
     const form = new FormData();
     form.append("model", model.modelName);
-    form.append("prompt", config.prompt);
+    form.append("prompt", prompt);
     form.append("n", "1");
     refs.forEach((b64, i) => {
       form.append("image", Buffer.from(stripDataUri(b64), "base64"), {
