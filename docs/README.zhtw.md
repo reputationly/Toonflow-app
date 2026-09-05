@@ -724,7 +724,7 @@ Toonflow 基於 Apache-2.0 協議開源發布，並附有補充商業協議。
 
 [![Star History Rank](https://api.star-history.com/badge?repo=HBAI-Ltd/Toonflow-app)](https://www.star-history.com/#HBAI-Ltd/Toonflow-app)
 
-[![Star History Chart](https://api.star-history.com/svg?repos=HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)](https://www.star-history.com/#HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)](https://star-history.dera.page/#HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)
 
 ---
 
@@ -757,6 +757,20 @@ Toonflow 基於 Apache-2.0 協議開源發布，並附有補充商業協議。
   </thead>
   <tbody>
     <tr>
+      <td align="center"><img src="./sponsored/metaso.jpg" alt="秘塔 Logo" width="48"></td>
+      <td align="center"><b>秘塔</b></td>
+      <td align="center">💻 算力贊助</td>
+      <td>秘塔科技提供高性價比的 MiniMax H3 影片生成服務：<b>768P 僅 0.09 元/秒，2K 僅 0.15 元/秒</b>。支援原生 2K、音畫同步，API 相容 <b>OpenAI 協議</b>，同時支援 <b>ComfyUI</b>、<b>無限畫布</b>，無需自行部署 GPU。<br/><br/>🎁 透過<a href="https://metaso.cn/minimax-h3/?s=toon">專屬連結註冊</a>，即可領取贈送額度及專屬優惠。商務對接可加微信：metasota12</td>
+      <td align="center"><a href="https://metaso.cn/minimax-h3/?s=toon">官網</a></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="./sponsored/apimart.jpg" alt="APIMart Logo" width="48"></td>
+      <td align="center"><b>APIMart</b></td>
+      <td align="center">💻 算力贊助</td>
+      <td>感謝 APIMart 贊助了本專案！APIMart 是專注於 AI 圖片/影片生成的低價 API 平台，<b>GPT-Image-2 低至 $0.006/張</b>，1 美元可產出 160+ 張圖片。圖片、影片一套非同步 API 通吃，提交任務取得 ID、回呼取得結果，跑批萬張不逾時、換模型不改程式碼。按量付費、無月費，透過此<a href="https://go.apimart.ai/gh-toonflow-app">註冊連結</a>註冊即可開用。</td>
+      <td align="center"><a href="https://go.apimart.ai/gh-toonflow-app">官網</a></td>
+    </tr>
+    <tr>
       <td align="center"><img src="./sponsored/sophnet.png" alt="算能雲 Logo" width="48"></td>
       <td align="center"><b>算能雲</b></td>
       <td align="center">💻 算力贊助</td>
@@ -764,13 +778,7 @@ Toonflow 基於 Apache-2.0 協議開源發布，並附有補充商業協議。
       <td align="center"><a href="https://www.sophnet.com/">官網</a></td>
     </tr>
     <tr>
-      <td align="center"><img src="./sponsored/atlascloud.png" alt="Atlas Cloud Logo" width="48"></td>
-      <td align="center"><b>Atlas Cloud</b></td>
-      <td align="center">💻 算力贊助</td>
-      <td>全球首個全模態推理平台。對話、圖像、影片、音訊——全部統一 API。300+ 模型，OpenAI 相容。</td>
-      <td align="center"><a href="https://www.atlascloud.ai/">官網</a></td>
-    </tr>
-    <tr>
+
       <td align="center"><img src="./sponsored/hunyuan.webp" alt="騰訊混元3D Logo" width="48"></td>
       <td align="center"><b>騰訊混元3D</b></td>
       <td align="center">🌐 世界模型技術支援</td>

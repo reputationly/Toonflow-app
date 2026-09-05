@@ -713,7 +713,7 @@ Toonflow 基于 Apache-2.0 协议开源发布，并附有补充商业协议。
 
 [![Star History Rank](https://api.star-history.com/badge?repo=HBAI-Ltd/Toonflow-app)](https://www.star-history.com/#HBAI-Ltd/Toonflow-app)
 
-[![Star History Chart](https://api.star-history.com/svg?repos=HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)](https://www.star-history.com/#HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)](https://star-history.dera.page/#HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)
 
 ---
 
@@ -745,18 +745,25 @@ Toonflow 基于 Apache-2.0 协议开源发布，并附有补充商业协议。
   </thead>
   <tbody>
     <tr>
+      <td align="center"><img src="./docs/sponsored/metaso.jpg" alt="秘塔 Logo" width="48"></td>
+      <td align="center"><b>秘塔</b></td>
+      <td align="center">💻 算力赞助</td>
+      <td>秘塔科技提供高性价比的 MiniMax H3 视频生成服务：<b>768P 仅 0.09 元/秒，2K 仅 0.15 元/秒</b>。支持原生 2K、音画同步，API 兼容 <b>OpenAI 协议</b>，同时支持 <b>ComfyUI</b>、<b>无限画布</b>，无需自行部署 GPU。<br/><br/>🎁 通过 <a href="https://metaso.cn/minimax-h3/?s=toon">专属链接注册</a>，即可领取赠送额度及专属优惠。商务对接可加微信：metasota12</td>
+      <td align="center"><a href="https://metaso.cn/minimax-h3/?s=toon">官网</a></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="./docs/sponsored/apimart.jpg" alt="APIMart Logo" width="48"></td>
+      <td align="center"><b>APIMart</b></td>
+      <td align="center">💻 算力赞助</td>
+      <td>感谢 APIMart 赞助了本项目！APIMart 是专注 AI 图片/视频生成的低价 API 平台，<b>GPT-Image-2 低至 $0.006/张</b>，1 美元可出图 160+ 张。图片、视频一套异步 API 通吃，提交任务拿 ID、回调取结果，跑批万张不超时、换模型不改代码。按量付费、无月费，通过此<a href="https://go.apimart.ai/gh-toonflow-app">注册链接</a>注册即可开用。</td>
+      <td align="center"><a href="https://go.apimart.ai/gh-toonflow-app">官网</a></td>
+    </tr>
+    <tr>
       <td align="center"><img src="./docs/sponsored/sophnet.png" alt="算能云 Logo" width="48"></td>
       <td align="center"><b>算能云</b></td>
       <td align="center">💻 算力赞助</td>
       <td>致力于打造更快、更稳、更省的一站式模型推理API服务平台</td>
       <td align="center"><a href="https://www.sophnet.com/">官网</a></td>
-    </tr>
-    <tr>
-      <td align="center"><img src="./docs/sponsored/atlascloud.png" alt="Atlas Cloud Logo" width="48"></td>
-      <td align="center"><b>Atlas Cloud</b></td>
-      <td align="center">💻 算力赞助</td>
-      <td>全球首个全模态推理平台。对话、图像、视频、音频——全部统一 API。300+ 模型，OpenAI 兼容。</td>
-      <td align="center"><a href="https://www.atlascloud.ai/">官网</a></td>
     </tr>
     <tr>
       <td align="center"><img src="./docs/sponsored/hunyuan.webp" alt="腾讯混元3D Logo" width="48"></td>
