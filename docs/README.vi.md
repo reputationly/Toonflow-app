@@ -724,7 +724,7 @@ Thỏa thuận đầy đủ xem trong tệp [LICENSE](./LICENSE).
 
 [![Star History Rank](https://api.star-history.com/badge?repo=HBAI-Ltd/Toonflow-app)](https://www.star-history.com/#HBAI-Ltd/Toonflow-app)
 
-[![Star History Chart](https://api.star-history.com/svg?repos=HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)](https://www.star-history.com/#HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)
+[![Star History Chart](https://star-history.dera.page/svg?repos=HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)](https://star-history.dera.page/#HBAI-Ltd/Toonflow-app&type=timeline&legend=top-left)
 
 ---
 
@@ -757,18 +757,25 @@ Cảm ơn các tổ chức/đơn vị/cá nhân sau đã cung cấp hỗ trợ c
   </thead>
   <tbody>
     <tr>
+      <td align="center"><img src="./sponsored/metaso.jpg" alt="Metaso Logo" width="48"></td>
+      <td align="center"><b>Metaso</b></td>
+      <td align="center">💻 Tài trợ sức mạnh tính toán</td>
+      <td>Metaso Technology cung cấp dịch vụ tạo video MiniMax H3 với chi phí hợp lý: <b>768P chỉ 0,09 NDT/giây, 2K chỉ 0,15 NDT/giây</b>. Hỗ trợ 2K gốc, đồng bộ âm thanh - hình ảnh, API tương thích <b>giao thức OpenAI</b>, đồng thời hỗ trợ <b>ComfyUI</b>, <b>canvas vô hạn</b>, không cần tự triển khai GPU.<br/><br/>🎁 Đăng ký qua <a href="https://metaso.cn/minimax-h3/?s=toon">liên kết độc quyền</a> để nhận credit tặng kèm và ưu đãi độc quyền. Liên hệ hợp tác kinh doanh qua WeChat: metasota12</td>
+      <td align="center"><a href="https://metaso.cn/minimax-h3/?s=toon">Trang web</a></td>
+    </tr>
+    <tr>
+      <td align="center"><img src="./sponsored/apimart.jpg" alt="APIMart Logo" width="48"></td>
+      <td align="center"><b>APIMart</b></td>
+      <td align="center">💻 Tài trợ sức mạnh tính toán</td>
+      <td>Cảm ơn APIMart đã tài trợ cho dự án này! APIMart là nền tảng API giá rẻ chuyên về tạo hình ảnh/video bằng AI, <b>GPT-Image-2 chỉ từ $0.006/ảnh</b>, 1 đô la tạo được hơn 160 ảnh. Một bộ API bất đồng bộ dùng chung cho cả hình ảnh và video: gửi tác vụ nhận ID, lấy kết quả qua polling hoặc callback. Xử lý hàng loạt hàng chục nghìn ảnh không timeout, đổi model không cần sửa code. Trả phí theo mức sử dụng, không phí hàng tháng — <a href="https://go.apimart.ai/gh-toonflow-app">đăng ký tại đây</a> để bắt đầu sử dụng.</td>
+      <td align="center"><a href="https://go.apimart.ai/gh-toonflow-app">Trang web</a></td>
+    </tr>
+    <tr>
       <td align="center"><img src="./sponsored/sophnet.png" alt="Sophnet Logo" width="48"></td>
       <td align="center"><b>Sophnet</b></td>
       <td align="center">💻 Tài trợ sức mạnh tính toán</td>
       <td>Cam kết tạo nền tảng dịch vụ API suy luận mô hình tất cả trong một nhanh hơn, ổn định hơn, tiết kiệm hơn</td>
       <td align="center"><a href="https://www.sophnet.com/">Trang web</a></td>
-    </tr>
-    <tr>
-      <td align="center"><img src="./sponsored/atlascloud.png" alt="Atlas Cloud Logo" width="48"></td>
-      <td align="center"><b>Atlas Cloud</b></td>
-      <td align="center">💻 Tài trợ sức mạnh tính toán</td>
-      <td>Nền tảng suy luận đa phương thức toàn diện đầu tiên trên thế giới. Hội thoại, hình ảnh, video, âm thanh - tất cả API thống nhất. Hơn 300 mô hình, tương thích OpenAI.</td>
-      <td align="center"><a href="https://www.atlascloud.ai/">Trang web</a></td>
     </tr>
     <tr>
       <td align="center"><img src="./sponsored/hunyuan.webp" alt="Tencent Hunyuan 3D Logo" width="48"></td>
