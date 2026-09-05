@@ -33,7 +33,7 @@
     "debug:ai": "npx @ai-sdk/devtools",
     "license": "node scripts/license.ts",
     "vendor2json": "node scripts/vendor2json.ts",
-    "release": "node scripts/release.ts"
+    "release": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/release.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.35",
