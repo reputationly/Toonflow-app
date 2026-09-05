@@ -1,0 +1,176 @@
+name: 同步上游
+
+# 定期把 HBAI-Ltd/Toonflow-app 的改动合过来。
+#
+# 与 new-api 仓库那套 sync-upstream 的区别：**不直接推 master，而是开 PR**。
+# 本仓与上游分歧较大（重写了发布流水线、换了版本号方案、加了自建供应商），
+# 自动合进默认分支一旦冲突或语义冲突，会直接影响发版。开 PR 让改动可审可回退。
+#
+# 冲突时不强推，转为开 issue 提醒手工处理。
+
+on:
+  schedule:
+    - cron: "0 3 * * 1" # 每周一 03:00 UTC（北京时间 11:00）
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  UPSTREAM: https://github.com/HBAI-Ltd/Toonflow-app.git
+  UPSTREAM_BRANCH: master
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    name: 检查并同步上游
+    steps:
+      - name: 检出 fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 需要完整历史才能 merge
+
+      - name: 配置 git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: 拉取上游
+        run: |
+          git remote add upstream "$UPSTREAM" 2>/dev/null || git remote set-url upstream "$UPSTREAM"
+          git fetch upstream "$UPSTREAM_BRANCH" --quiet
+
+      - name: 检查是否有新提交
+        id: check
+        run: |
+          BEHIND=$(git rev-list --count HEAD..upstream/$UPSTREAM_BRANCH)
+          AHEAD=$(git rev-list --count upstream/$UPSTREAM_BRANCH..HEAD)
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
+          echo "落后上游 $BEHIND 个提交，本仓领先 $AHEAD 个"
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "✅ 已是最新，无需同步"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
+          # 上游 package.json 的版本号——决定同步后是否要抬 package.json，
+          # 进而影响 yarn release 算出的迭代号（见 docs/发版指南.md 版本号规则）
+          UP_VER=$(git show upstream/$UPSTREAM_BRANCH:package.json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version")
+          OUR_VER=$(node -p "require('./package.json').version")
+          echo "upstream_version=$UP_VER" >> "$GITHUB_OUTPUT"
+          echo "our_version=$OUR_VER" >> "$GITHUB_OUTPUT"
+          echo "上游版本 $UP_VER / 本仓基线 $OUR_VER"
+
+      - name: 生成同步分支
+        id: merge
+        if: steps.check.outputs.skip != 'true'
+        run: |
+          BRANCH="sync/upstream-$(date +%Y%m%d)"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          git checkout -B "$BRANCH"
+
+          if git merge upstream/$UPSTREAM_BRANCH --no-edit -m "chore: 同步上游 $UPSTREAM_BRANCH"; then
+            echo "conflict=false" >> "$GITHUB_OUTPUT"
+            echo "✅ 合并成功"
+          else
+            # 记录冲突文件后回滚，绝不推带冲突标记的分支
+            git diff --name-only --diff-filter=U > /tmp/conflicts.txt || true
+            echo "conflict=true" >> "$GITHUB_OUTPUT"
+            {
+              echo "files<<EOF"
+              cat /tmp/conflicts.txt
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
+            git merge --abort
+            echo "⚠️ 存在冲突，已回滚"
+          fi
+
+      - name: 推送并开 PR
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.conflict == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.merge.outputs.branch }}
+          BEHIND: ${{ steps.check.outputs.behind }}
+          UP_VER: ${{ steps.check.outputs.upstream_version }}
+          OUR_VER: ${{ steps.check.outputs.our_version }}
+        run: |
+          git push -f origin "$BRANCH"
+
+          # 版本号提示：上游抬了版本才需要改 package.json
+          if [ "$UP_VER" != "$OUR_VER" ]; then
+            VER_NOTE="⚠️ **上游版本已从 \`$OUR_VER\` 抬到 \`$UP_VER\`**，合并后请把 \`package.json\` 的 \`version\` 改成 \`$UP_VER\`，之后 \`yarn release\` 会从 \`v$UP_VER.1\` 开始。"
+          else
+            VER_NOTE="上游版本仍为 \`$UP_VER\`，与本仓基线一致，\`package.json\` 无需改动。"
+          fi
+
+          BODY=$(cat <<EOF
+          自动同步上游 \`HBAI-Ltd/Toonflow-app@$UPSTREAM_BRANCH\` 的 $BEHIND 个提交。
+
+          $VER_NOTE
+
+          ## 合并前请确认
+
+          - [ ] \`yarn lint\` 通过
+          - [ ] 若上游改过 \`data/vendor/*.ts\`，跑 \`yarn vendor2json\` 重新生成 \`src/lib/vendor.json\`
+            （内置供应商的注册源是它，只改 \`data/vendor/\` 新用户装上不会有我们的供应商）
+          - [ ] 若上游改过 \`.github/workflows/release.yml\`，确认没有覆盖掉本仓的 R2 发布流程
+          - [ ] 若上游改过 \`src/routes/setting/about/checkUpdate.ts\`，确认四段版本号比较逻辑与自建 R2 地址仍在
+          - [ ] 前端若有改动，需在 Toonflow-web 重新 \`yarn build\` 并同步 \`data/web/\`
+
+          合并后用 \`yarn release\` 发版。详见 [发版指南](../blob/master/docs/发版指南.md)。
+
+          ---
+          <sub>由 \`.github/workflows/sync-upstream.yml\` 自动创建</sub>
+          EOF
+          )
+
+          EXISTING=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            gh pr edit "$EXISTING" --body "$BODY"
+            echo "✅ 已更新 PR #$EXISTING"
+          else
+            gh pr create --base master --head "$BRANCH" \
+              --title "chore: 同步上游 $BEHIND 个提交" --body "$BODY"
+          fi
+
+      - name: 冲突时开 issue
+        if: steps.check.outputs.skip != 'true' && steps.merge.outputs.conflict == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BEHIND: ${{ steps.check.outputs.behind }}
+          FILES: ${{ steps.merge.outputs.files }}
+        run: |
+          TITLE="上游同步存在冲突（$BEHIND 个提交待合并）"
+          # 已有同名未关闭 issue 就不重复开，避免每周刷一条
+          EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty')
+          if [ -n "$EXISTING" ]; then
+            echo "已存在 issue #$EXISTING，跳过"
+            exit 0
+          fi
+          gh issue create --title "$TITLE" --body "$(cat <<EOF
+          自动合并上游 \`HBAI-Ltd/Toonflow-app@$UPSTREAM_BRANCH\` 时发生冲突，已回滚，需手工处理。
+
+          ## 冲突文件
+
+          \`\`\`
+          $FILES
+          \`\`\`
+
+          ## 手工同步
+
+          \`\`\`bash
+          git fetch upstream master
+          git checkout -b sync/upstream-manual
+          git merge upstream/master     # 解决冲突
+          yarn lint && yarn build
+          git push -u origin sync/upstream-manual
+          \`\`\`
+
+          注意事项见 [发版指南 · 同步上游后发版](../blob/master/docs/发版指南.md#同步上游后发版)。
+
+          ---
+          <sub>由 \`.github/workflows/sync-upstream.yml\` 自动创建</sub>
+          EOF
+          )"
