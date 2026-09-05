@@ -91,6 +91,9 @@ jobs:
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.conflict == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # gh 在 fork 里默认把 PR/issue 提到 parent 仓库，
+          # 而 GITHUB_TOKEN 对上游无写权限，会报 Resource not accessible by integration
+          REPO: ${{ github.repository }}
           BRANCH: ${{ steps.merge.outputs.branch }}
           BEHIND: ${{ steps.check.outputs.behind }}
           UP_VER: ${{ steps.check.outputs.upstream_version }}
@@ -126,12 +129,12 @@ jobs:
           EOF
           )
 
-          EXISTING=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number // empty')
+          EXISTING=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
-            gh pr edit "$EXISTING" --body "$BODY"
+            gh pr edit "$EXISTING" --repo "$REPO" --body "$BODY"
             echo "✅ 已更新 PR #$EXISTING"
           else
-            gh pr create --base master --head "$BRANCH" \
+            gh pr create --repo "$REPO" --base master --head "$BRANCH" \
               --title "chore: 同步上游 $BEHIND 个提交" --body "$BODY"
           fi
 
@@ -139,17 +142,18 @@ jobs:
         if: steps.check.outputs.skip != 'true' && steps.merge.outputs.conflict == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           BEHIND: ${{ steps.check.outputs.behind }}
           FILES: ${{ steps.merge.outputs.files }}
         run: |
           TITLE="上游同步存在冲突（$BEHIND 个提交待合并）"
           # 已有同名未关闭 issue 就不重复开，避免每周刷一条
-          EXISTING=$(gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty')
+          EXISTING=$(gh issue list --repo "$REPO" --state open --search "$TITLE in:title" --json number --jq '.[0].number // empty')
           if [ -n "$EXISTING" ]; then
             echo "已存在 issue #$EXISTING，跳过"
             exit 0
           fi
-          gh issue create --title "$TITLE" --body "$(cat <<EOF
+          gh issue create --repo "$REPO" --title "$TITLE" --body "$(cat <<EOF
           自动合并上游 \`HBAI-Ltd/Toonflow-app@$UPSTREAM_BRANCH\` 时发生冲突，已回滚，需手工处理。
 
           ## 冲突文件
