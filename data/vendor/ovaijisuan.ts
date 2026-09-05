@@ -1,5 +1,5 @@
 /**
- * 昇腾 MaaS（New API 中转）供应商适配
+ * ovaijisuan 自部署模型服务 · 供应商适配
  * @version 3.0
  *
  * 端点契约（已对 https://maas.ovaijisuan.com 实测验证）：
@@ -126,9 +126,9 @@ const vendor: VendorConfig = {
   id: "ovaijisuan",
   version: "3.0",
   author: "self-hosted",
-  name: "昇腾MaaS（自建）",
+  name: "ovaijisuan",
   description:
-    "自建 New API 中转平台。文本走 OpenAI 兼容接口；图像走 images/generations 与 images/edits；视频走 video/generations 异步任务。模型列表可在下方手动增删。",
+    "自部署模型服务。文本走 OpenAI 兼容接口；图像走 images/generations 与 images/edits；视频走 video/generations 异步任务。模型列表可在下方手动增删。",
   icon: "",
   inputs: [
     { key: "apiKey", label: "API密钥", type: "password", required: true, placeholder: "sk-..." },
